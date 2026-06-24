@@ -28,8 +28,11 @@ async function supaGetTransactions(token){
   const res = await fetch(`${SUPABASE_URL}/rest/v1/transactions?select=*&order=created_at.desc`, {
     headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` }
   });
-  if(!res.ok) return [];
-  return res.json();
+  if(!res.ok){
+    const e = await res.json().catch(()=>({}));
+    return { ok:false, error: `[${res.status}] ${e.message || e.msg || JSON.stringify(e)}` };
+  }
+  return { ok:true, data: await res.json() };
 }
 async function supaInsertTransaction(token, row){
   const res = await fetch(`${SUPABASE_URL}/rest/v1/transactions`, {
@@ -38,7 +41,11 @@ async function supaInsertTransaction(token, row){
       "Content-Type":"application/json", "Prefer":"return=minimal" },
     body: JSON.stringify(row)
   });
-  if(!res.ok){ const e = await res.json().catch(()=>({})); console.error("Insert failed:", e); }
+  if(!res.ok){
+    const e = await res.json().catch(()=>({}));
+    return { ok:false, error: `[${res.status}] ${e.message || e.msg || e.error_description || JSON.stringify(e)}` };
+  }
+  return { ok:true };
 }
 
 // ─── TRANSLATIONS ─────────────────────────────────────────────────────────────
@@ -1071,10 +1078,14 @@ export default function App() {
   useEffect(()=>{
     if(!user || !token) return;
     (async ()=>{
-      const data = await supaGetTransactions(token);
-      if(Array.isArray(data)) setTxList(data.map(r=>({
-        id:r.id, name:r.name, cat:r.cat, amount:+r.amount, type:r.type, month:r.month, day:r.day
-      })));
+      const result = await supaGetTransactions(token);
+      if(result.ok){
+        setTxList(result.data.map(r=>({
+          id:r.id, name:r.name, cat:r.cat, amount:+r.amount, type:r.type, month:r.month, day:r.day
+        })));
+      } else {
+        alert("⚠️ فشل تحميل المعاملات من قاعدة البيانات:\n" + result.error);
+      }
     })();
   },[user, token]);
 
@@ -1116,11 +1127,14 @@ export default function App() {
     setTxList(p=>[tx,...p]); // تحديث فوري للواجهة
     setNewTx({name:"",amount:"",type:"expense",cat:"Food",month:NOW_MONTH,day:""});
     setAddErr("");setShowAdd(false);
-    // حفظ في Supabase في الخلفية
-    await supaInsertTransaction(token, {
+    // حفظ في Supabase في الخلفية — لو فشل، هيظهر تنبيه واضح بسبب الفشل
+    const result = await supaInsertTransaction(token, {
       id:tx.id, user_id:user.id, name:tx.name, cat:tx.cat,
       amount:tx.amount, type:tx.type, month:tx.month, day:tx.day
     });
+    if(!result.ok){
+      alert("⚠️ فشل حفظ المعاملة في قاعدة البيانات:\n" + result.error);
+    }
   };
 
   const stStyle = s=>({
